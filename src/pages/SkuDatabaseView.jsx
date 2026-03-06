@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   subscribeWarehouses,
   subscribeSkus,
@@ -15,6 +15,14 @@ function num(x) {
   const n = Number(x);
   return Number.isFinite(n) ? n : 0;
 }
+
+const UID_COLORS = [
+  'bg-blue-50 text-blue-700',
+  'bg-emerald-50 text-emerald-700',
+  'bg-purple-50 text-purple-700',
+  'bg-amber-50 text-amber-700',
+  'bg-rose-50 text-rose-700',
+];
 
 function formatShortDate(ms) {
   if (ms == null) return '—';
@@ -60,12 +68,13 @@ function escapeCsvCell(val) {
 
 function downloadSkuDatabaseCsv(rows, formatShortDateFn) {
   const headers = [
-    'Warehouse', 'SKU', 'Item Name', 'Weight (kg)', 'Pcs in a Box', 'Lead time', 'Purchase Rate', 'Sell rate',
+    'UID', 'Warehouse', 'SKU', 'Item Name', 'Weight (kg)', 'Pcs in a Box', 'Lead time', 'Purchase Rate', 'Sell rate',
     'Daily average', 'Safety Stock (Days)', 'Safety Stock (QTY)', 'Seasonal Buffer (Days)', 'Seasonal Buffer (QTY)',
     'Growth Buffer (Days)', 'Growth Buffer (QTY)', 'Re-order Point', 'Closing Stock', 'Closing stock update date',
     'Effective Stock', 'Stock end (days)',
   ];
   const line = (r) => [
+    escapeCsvCell(r.uid ?? ''),
     escapeCsvCell(r.warehouseName),
     escapeCsvCell(r.skuCode),
     escapeCsvCell(r.itemName),
@@ -177,6 +186,28 @@ export default function SkuDatabaseView() {
   const totalMonthlyPurchase = rows.reduce((s, r) => s + r.monthlyPurchaseProj, 0);
   const totalMonthlySell = rows.reduce((s, r) => s + r.monthlySellProj, 0);
 
+  const uidToColorIndex = useMemo(() => {
+    const set = new Set();
+    rows.forEach((r) => {
+      const u = (r.uid || '').toString().trim();
+      if (u) set.add(u);
+    });
+    const sorted = Array.from(set).sort();
+    const map = {};
+    sorted.forEach((uid, i) => {
+      map[uid] = i % UID_COLORS.length;
+    });
+    return map;
+  }, [rows]);
+
+  const getUidColor = (uid) => {
+    const key = (uid || '').toString().trim();
+    if (!key) return '';
+    const index = uidToColorIndex[key];
+    if (index === undefined) return '';
+    return UID_COLORS[index];
+  };
+
   const handleAddRow = async (e) => {
     e.preventDefault();
     const warehouseId = addRowForm.warehouseId?.trim();
@@ -245,6 +276,7 @@ export default function SkuDatabaseView() {
         await updateSku(row.sku.id, skuEdits);
       }
       const stockPayload = {};
+      if (stockEdits.uid !== undefined) stockPayload.uid = stockEdits.uid === '' ? '' : String(stockEdits.uid).trim();
       if (stockEdits.leadTime !== undefined && stockEdits.leadTime !== '') stockPayload.leadTime = Number(stockEdits.leadTime);
       if (stockEdits.dailyAvgSale !== undefined && stockEdits.dailyAvgSale !== '') stockPayload.dailyAvgSale = Number(stockEdits.dailyAvgSale);
       if (stockEdits.safetyStockDays !== undefined && stockEdits.safetyStockDays !== '') stockPayload.safetyStockDays = Number(stockEdits.safetyStockDays);
@@ -286,6 +318,7 @@ export default function SkuDatabaseView() {
         sellRate: row.sellRate ?? '',
       },
       stockEdits: {
+        uid: row.uid ?? '',
         leadTime: row.leadTime ?? '',
         dailyAvgSale: row.dailyAvg ?? '',
         safetyStockDays: row.safetyStockDays ?? '',
@@ -362,6 +395,7 @@ export default function SkuDatabaseView() {
         <table>
           <thead>
             <tr>
+              <th rowSpan={2}>UID</th>
               <th rowSpan={2}>Warehouse</th>
               <th rowSpan={2}>SKU</th>
               <th rowSpan={2}>Item Name</th>
@@ -393,6 +427,7 @@ export default function SkuDatabaseView() {
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
+                <td className={`text-xs font-medium ${getUidColor(r.uid ?? '')}`}>{r.uid ?? '—'}</td>
                 <td>{r.warehouseName}</td>
                 <td className="font-medium">{r.skuCode}</td>
                 <td>{r.itemName}</td>
@@ -572,6 +607,15 @@ export default function SkuDatabaseView() {
               <div>
                 <h3 className="mb-2 text-sm font-medium text-[var(--color-muted)]">Stock (warehouse)</h3>
                 <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs text-[var(--color-muted)]">UID (links with PO)</label>
+                    <input
+                      value={editModal.stockEdits.uid ?? ''}
+                      onChange={(e) => setEditModal((m) => ({ ...m, stockEdits: { ...m.stockEdits, uid: e.target.value } }))}
+                      placeholder="e.g. WHPO1"
+                      className="input w-full"
+                    />
+                  </div>
                   <div>
                     <label className="mb-1 block text-xs text-[var(--color-muted)]">Lead time (days)</label>
                     <input

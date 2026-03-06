@@ -210,7 +210,7 @@ export async function getStockRecord(warehouseId, skuCode) {
   return { id: d.id, ...data, updatedAt: data.updatedAt?.toMillis?.() };
 }
 
-export async function setStock(warehouseId, skuCode, { currentStock, dailyAvgSale, leadTime, safetyStock, seasonalBuffer, stockForGrowth, safetyStockDays, seasonalBufferDays, growthBufferDays }, previousStock = null) {
+export async function setStock(warehouseId, skuCode, { currentStock, dailyAvgSale, leadTime, safetyStock, seasonalBuffer, stockForGrowth, safetyStockDays, seasonalBufferDays, growthBufferDays, uid }, previousStock = null) {
   const id = stockDocId(warehouseId, skuCode);
   const ref = doc(db, 'stock', id);
   const docSnap = await getDoc(ref);
@@ -235,6 +235,7 @@ export async function setStock(warehouseId, skuCode, { currentStock, dailyAvgSal
   if (Number.isFinite(safetyDays)) payload.safetyStockDays = safetyDays;
   if (Number.isFinite(seasonalDays)) payload.seasonalBufferDays = seasonalDays;
   if (Number.isFinite(growthDays)) payload.growthBufferDays = growthDays;
+  if (uid !== undefined) payload.uid = uid === '' || uid == null ? null : String(uid).trim();
   if (docSnap.exists()) {
     await updateDoc(ref, payload);
   } else {
@@ -281,6 +282,7 @@ export async function addStockRecord(warehouseId, skuCode, payload = {}) {
     stockForGrowth: growthQty,
     updatedAt: serverTimestamp(),
   };
+  if (payload.uid !== undefined) data.uid = payload.uid === '' || payload.uid == null ? null : String(payload.uid).trim();
   if (Number.isFinite(safetyDays)) data.safetyStockDays = safetyDays;
   if (Number.isFinite(seasonalDays)) data.seasonalBufferDays = seasonalDays;
   if (Number.isFinite(growthDays)) data.growthBufferDays = growthDays;
@@ -313,6 +315,7 @@ export async function updateStock(warehouseId, skuCode, updates) {
   payload.seasonalBuffer = Math.round(dailyAvg * safeDays(seasonalDays));
   payload.stockForGrowth = Math.round(dailyAvg * safeDays(growthDays));
   if (updates.closingStockUpdateDate !== undefined) payload.closingStockUpdateDate = updates.closingStockUpdateDate ? new Date(updates.closingStockUpdateDate) : null;
+  if (updates.uid !== undefined) payload.uid = updates.uid === '' || updates.uid == null ? null : String(updates.uid).trim();
   await updateDoc(ref, payload);
   if (updates.currentStock !== undefined && current.currentStock !== payload.currentStock) {
     await addStockMovement({

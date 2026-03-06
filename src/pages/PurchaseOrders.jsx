@@ -71,12 +71,13 @@ export default function PurchaseOrders() {
   const [deleteConfirm, setDeleteConfirm] = useState(null); // { po } when open
   const [deleting, setDeleting] = useState(false);
   const [editModal, setEditModal] = useState(null); // { po } when open
-  const [editForm, setEditForm] = useState({ poNumber: '', quantity: '', etd: '', eta: '' });
+  const [editForm, setEditForm] = useState({ poNumber: '', quantity: '', etd: '', eta: '', finalEtaEarlyBy: '' });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [newRowA, setNewRowA] = useState(null);
   const [newRowB, setNewRowB] = useState(null);
   const [archiveToggle, setArchiveToggle] = useState(false);
   const [planningInputs, setPlanningInputs] = useState({}); // { [poId]: { etd: string, eta: string, maxLoadingDays: string } }
+  const [warehouseFilter, setWarehouseFilter] = useState('');
 
   useEffect(() => {
     const unsub = subscribeWarehouses(setWarehouses);
@@ -99,6 +100,28 @@ export default function PurchaseOrders() {
     const unsub = subscribeAllStock(setStockList);
     return () => unsub();
   }, []);
+
+  // Pre-fill UID from SKU Database when warehouse + SKU is selected (link PO UID with SKU Database UID)
+  useEffect(() => {
+    if (!newRowA?.warehouseId || !newRowA?.skuCode) return;
+    const stock = stockList.find(
+      (s) => s.warehouseId === newRowA.warehouseId && s.skuCode === newRowA.skuCode,
+    );
+    if (stock?.uid)
+      setNewRowA((prev) => (prev && prev.groupId !== stock.uid ? { ...prev, groupId: stock.uid } : prev));
+  }, [newRowA?.warehouseId, newRowA?.skuCode, stockList]);
+  useEffect(() => {
+    if (!newRowB?.warehouseId || !newRowB?.skuCode) return;
+    const stock = stockList.find(
+      (s) => s.warehouseId === newRowB.warehouseId && s.skuCode === newRowB.skuCode,
+    );
+    if (stock?.uid)
+      setNewRowB((prev) =>
+        prev && (prev.groupId === '' || prev.groupId == null)
+          ? { ...prev, groupId: stock.uid }
+          : prev,
+      );
+  }, [newRowB?.warehouseId, newRowB?.skuCode, stockList]);
 
   const activeSkus = skus.filter((s) => s.status === 'Active');
 
@@ -151,6 +174,7 @@ export default function PurchaseOrders() {
       quantity: String(po.quantity ?? ''),
       etd: po.etd ? new Date(po.etd).toISOString().slice(0, 10) : '',
       eta: po.eta ? new Date(po.eta).toISOString().slice(0, 10) : '',
+      finalEtaEarlyBy: po.type === 'B' && (po.finalEtaEarlyBy != null && po.finalEtaEarlyBy !== '') ? String(po.finalEtaEarlyBy) : '',
     });
     setError('');
   };
@@ -186,6 +210,9 @@ export default function PurchaseOrders() {
         quantity: qty,
         etd: editForm.etd || undefined,
         eta: editForm.eta?.trim() || null,
+        ...(editModal.po.type === 'B'
+          ? { finalEtaEarlyBy: editForm.finalEtaEarlyBy === '' ? null : (Number(editForm.finalEtaEarlyBy) || null) }
+          : {}),
       });
       setEditModal(null);
     } catch (e) {
@@ -336,6 +363,14 @@ export default function PurchaseOrders() {
   };
 
   const warehouseNames = Object.fromEntries(warehouses.map((w) => [w.id, w.name]));
+  const skuCodeToName = useMemo(
+    () => Object.fromEntries(skus.map((s) => [s.skuCode, s.name || s.skuCode])),
+    [skus],
+  );
+  const filteredList = useMemo(() => {
+    if (!warehouseFilter) return list;
+    return list.filter((po) => po.warehouseId === warehouseFilter);
+  }, [list, warehouseFilter]);
 
   function getStockForPo(po) {
     if (!po) return null;
@@ -412,11 +447,11 @@ export default function PurchaseOrders() {
     };
   }
 
-  const tableARows = list.filter((po) => (po.type ?? 'A') === 'A' && !po.archived);
-  const allTableARows = list.filter((po) => (po.type ?? 'A') === 'A');
-  const tableBRows = list.filter((po) => po.type === 'B' && !po.archived);
+  const tableARows = filteredList.filter((po) => (po.type ?? 'A') === 'A' && !po.archived);
+  const allTableARows = filteredList.filter((po) => (po.type ?? 'A') === 'A');
+  const tableBRows = filteredList.filter((po) => po.type === 'B' && !po.archived);
   const archivedTableARows = allTableARows.filter((po) => po.archived);
-  const archivedTableBRows = list.filter((po) => po.type === 'B' && po.archived);
+  const archivedTableBRows = filteredList.filter((po) => po.type === 'B' && po.archived);
   const hasAnyTableA = tableARows.length > 0;
 
   const uidToColorIndex = useMemo(() => {
@@ -478,6 +513,24 @@ export default function PurchaseOrders() {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="page-head">Purchase Orders</h1>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-[var(--color-muted)]" htmlFor="po-warehouse-filter">
+            Warehouse:
+          </label>
+          <select
+            id="po-warehouse-filter"
+            value={warehouseFilter}
+            onChange={(e) => setWarehouseFilter(e.target.value)}
+            className="input w-auto min-w-[180px]"
+          >
+            <option value="">All warehouses</option>
+            {warehouses.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       {error && <div className="alert-error mb-4">{error}</div>}
 
@@ -499,33 +552,22 @@ export default function PurchaseOrders() {
               <tr>
                 <th style={{ minWidth: 96 }}>UID</th>
                 <th>Warehouse</th>
-                <th style={{ minWidth: 220 }}>SKU</th>
+                <th>Item Name</th>
                 <th>PO Number</th>
-                <th>ETD</th>
                 <th>ETA</th>
-                <th>ETA early by (days)</th>
                 <th>PO Qty</th>
-                <th>PO Qty stock end days</th>
-                <th>Total Stock end days</th>
                 <th>Stock End Date</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {newRowA && (() => {
-                const draftPo = {
-                  warehouseId: newRowA.warehouseId,
-                  skuCode: newRowA.skuCode,
-                  quantity: Number(newRowA.quantity) || 0,
-                  eta: parseDateInputToMs(newRowA.eta),
-                };
-                const draftCalc = computeRowA(draftPo);
                 return (
                 <tr key="new-A">
                   <td className={`text-xs font-medium ${getUidColor(newRowA.groupId || '')}`}>
                     {newRowA.groupId}
                   </td>
-                  <td style={{ minWidth: 220 }}>
+                  <td style={{ minWidth: 160 }}>
                     <select
                       value={newRowA.warehouseId}
                       onChange={(e) =>
@@ -541,7 +583,7 @@ export default function PurchaseOrders() {
                       ))}
                     </select>
                   </td>
-                  <td>
+                  <td style={{ minWidth: 180 }}>
                     <select
                       value={newRowA.skuCode}
                       onChange={(e) =>
@@ -549,10 +591,10 @@ export default function PurchaseOrders() {
                       }
                       className="input w-full"
                     >
-                      <option value="">Select SKU</option>
+                      <option value="">Select item</option>
                       {activeSkus.map((s) => (
                         <option key={s.id} value={s.skuCode}>
-                          {s.skuCode} – {s.name}
+                          {s.name || s.skuCode}
                         </option>
                       ))}
                     </select>
@@ -571,27 +613,12 @@ export default function PurchaseOrders() {
                   <td>
                     <input
                       type="date"
-                      value={newRowA.etd}
-                      onChange={(e) =>
-                        setNewRowA((prev) => ({ ...(prev || {}), etd: e.target.value }))
-                      }
-                      className="input w-full"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="date"
                       value={newRowA.eta}
                       onChange={(e) =>
                         setNewRowA((prev) => ({ ...(prev || {}), eta: e.target.value }))
                       }
                       className="input w-full"
                     />
-                  </td>
-                  <td>
-                    {draftCalc.etaEarlyByDays != null
-                      ? Math.round(draftCalc.etaEarlyByDays)
-                      : '—'}
                   </td>
                   <td>
                     <input
@@ -603,16 +630,6 @@ export default function PurchaseOrders() {
                       }
                       className="input w-full"
                     />
-                  </td>
-                  <td>
-                    {draftCalc.poQtyStockEndDays != null
-                      ? draftCalc.poQtyStockEndDays.toFixed(1)
-                      : '—'}
-                  </td>
-                  <td>
-                    {draftCalc.totalStockEndDays != null
-                      ? draftCalc.totalStockEndDays.toFixed(1)
-                      : '—'}
                   </td>
                   <td>—</td>
                   <td>
@@ -646,14 +663,10 @@ export default function PurchaseOrders() {
                       {uid}
                     </td>
                     <td>{warehouseNames[po.warehouseId] || po.warehouseId}</td>
-                    <td style={{ minWidth: 220 }}>{po.skuCode}</td>
+                    <td>{skuCodeToName[po.skuCode] ?? po.skuCode}</td>
                     <td>{po.poNumber}</td>
-                    <td className="text-[var(--color-muted)]">{formatShortDate(po.etd)}</td>
                     <td className="text-[var(--color-muted)]">{formatShortDate(po.eta)}</td>
-                    <td>{a.etaEarlyByDays != null ? Math.round(a.etaEarlyByDays) : '—'}</td>
                     <td>{po.quantity}</td>
-                    <td>{a.poQtyStockEndDays != null ? a.poQtyStockEndDays.toFixed(1) : '—'}</td>
-                    <td>{a.totalStockEndDays != null ? a.totalStockEndDays.toFixed(1) : '—'}</td>
                     <td className="text-[var(--color-muted)]">
                       {a.stockEndDateMs != null ? formatShortDate(a.stockEndDateMs) : '—'}
                     </td>
@@ -715,22 +728,16 @@ export default function PurchaseOrders() {
               <tr>
                 <th style={{ minWidth: 96 }}>UID</th>
                 <th>Warehouse</th>
-                <th style={{ minWidth: 220 }}>SKU</th>
+                <th>Item Name</th>
                 <th>PO Number</th>
-                <th>ETD</th>
                 <th>ETA</th>
-                <th>ETA early by (days)</th>
-                <th>Final ETA early by</th>
                 <th>PO Qty</th>
-                <th>PO Qty stock end days</th>
-                <th>Total Stock end days</th>
                 <th>Stock End Date</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {newRowB && (() => {
-                // For draft Table B calculations, use Table A rows with the same UID only.
                 const uid = (newRowB.groupId || '').trim();
                 const groupRowsAForDraft = uid
                   ? allTableARows.filter(
@@ -765,7 +772,7 @@ export default function PurchaseOrders() {
                       placeholder="UID"
                     />
                   </td>
-                  <td style={{ minWidth: 220 }}>
+                  <td style={{ minWidth: 160 }}>
                     <select
                       value={newRowB.warehouseId}
                       onChange={(e) =>
@@ -781,7 +788,7 @@ export default function PurchaseOrders() {
                       ))}
                     </select>
                   </td>
-                  <td>
+                  <td style={{ minWidth: 180 }}>
                     <select
                       value={newRowB.skuCode}
                       onChange={(e) =>
@@ -789,10 +796,10 @@ export default function PurchaseOrders() {
                       }
                       className="input w-full"
                     >
-                      <option value="">Select SKU</option>
+                      <option value="">Select item</option>
                       {activeSkus.map((s) => (
                         <option key={s.id} value={s.skuCode}>
-                          {s.skuCode} – {s.name}
+                          {s.name || s.skuCode}
                         </option>
                       ))}
                     </select>
@@ -811,40 +818,11 @@ export default function PurchaseOrders() {
                   <td>
                     <input
                       type="date"
-                      value={newRowB.etd}
-                      onChange={(e) =>
-                        setNewRowB((prev) => ({ ...(prev || {}), etd: e.target.value }))
-                      }
-                      className="input w-full"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="date"
                       value={newRowB.eta}
                       onChange={(e) =>
                         setNewRowB((prev) => ({ ...(prev || {}), eta: e.target.value }))
                       }
                       className="input w-full"
-                    />
-                  </td>
-                  <td>
-                    {draftCalcB.etaEarlyByDays != null
-                      ? Math.round(draftCalcB.etaEarlyByDays)
-                      : '—'}
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      value={newRowB.finalEtaEarlyBy}
-                      onChange={(e) =>
-                        setNewRowB((prev) => ({
-                          ...(prev || {}),
-                          finalEtaEarlyBy: e.target.value,
-                        }))
-                      }
-                      className="input w-full"
-                      placeholder="Final ETA early by"
                     />
                   </td>
                   <td>
@@ -857,16 +835,6 @@ export default function PurchaseOrders() {
                       }
                       className="input w-full"
                     />
-                  </td>
-                  <td>
-                    {draftCalcB.poQtyStockEndDays != null
-                      ? draftCalcB.poQtyStockEndDays.toFixed(1)
-                      : '—'}
-                  </td>
-                  <td>
-                    {draftCalcB.totalStockEndDays != null
-                      ? draftCalcB.totalStockEndDays.toFixed(1)
-                      : '—'}
                   </td>
                   <td>
                     {draftCalcB.stockEndDateMs != null
@@ -904,15 +872,10 @@ export default function PurchaseOrders() {
                       {po.groupId || ''}
                     </td>
                     <td>{warehouseNames[po.warehouseId] || po.warehouseId}</td>
-                    <td style={{ minWidth: 220 }}>{po.skuCode}</td>
+                    <td>{skuCodeToName[po.skuCode] ?? po.skuCode}</td>
                     <td>{po.poNumber}</td>
-                    <td className="text-[var(--color-muted)]">{formatShortDate(po.etd)}</td>
                     <td className="text-[var(--color-muted)]">{formatShortDate(po.eta)}</td>
-                    <td>{b.etaEarlyByDays != null ? Math.round(b.etaEarlyByDays) : '—'}</td>
-                    <td>{b.finalEtaEarlyBy != null ? Math.round(b.finalEtaEarlyBy) : '—'}</td>
                     <td>{po.quantity}</td>
-                    <td>{b.poQtyStockEndDays != null ? b.poQtyStockEndDays.toFixed(1) : '—'}</td>
-                    <td>{b.totalStockEndDays != null ? b.totalStockEndDays.toFixed(1) : '—'}</td>
                     <td className="text-[var(--color-muted)]">
                       {b.stockEndDateMs != null ? formatShortDate(b.stockEndDateMs) : '—'}
                     </td>
@@ -963,7 +926,6 @@ export default function PurchaseOrders() {
                   <th>Warehouse</th>
                   <th>SKU</th>
                   <th>PO Number</th>
-                  <th>ETD</th>
                   <th>ETA</th>
                   <th>Max loading days</th>
                   <th>Estimated stock-out date</th>
@@ -971,6 +933,7 @@ export default function PurchaseOrders() {
                   <th>Days required to reach estimated stock-out date</th>
                   <th>Minimum between Max loading and Days required</th>
                   <th>Suggested PO Qty (Daily average × min days)</th>
+                  <th className="w-0 whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1037,22 +1000,6 @@ export default function PurchaseOrders() {
                       <td>
                         <input
                           type="date"
-                          value={input.etd}
-                          onChange={(e) =>
-                            setPlanningInputs((prev) => ({
-                              ...prev,
-                              [po.id]: {
-                                ...(prev[po.id] || {}),
-                                etd: e.target.value,
-                              },
-                            }))
-                          }
-                          className="input w-36"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="date"
                           value={input.eta}
                           onChange={(e) =>
                             setPlanningInputs((prev) => ({
@@ -1103,6 +1050,24 @@ export default function PurchaseOrders() {
                       <td>
                         {suggestedQty != null ? suggestedQty : '—'}
                       </td>
+                      <td className="whitespace-nowrap">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(po)}
+                            className="btn-ghost py-1 text-xs"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteConfirm({ po })}
+                            className="btn-ghost py-1 text-xs text-[var(--color-danger)] hover:bg-red-50 hover:text-[var(--color-danger)]"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -1136,9 +1101,8 @@ export default function PurchaseOrders() {
                       <tr>
                         <th>UID</th>
                         <th>Warehouse</th>
-                        <th>SKU</th>
+                        <th>Item Name</th>
                         <th>PO Number</th>
-                        <th>ETD</th>
                         <th>ETA</th>
                         <th>PO Qty</th>
                         <th>Actions</th>
@@ -1151,9 +1115,8 @@ export default function PurchaseOrders() {
                             {po.groupId || po.poNumber}
                           </td>
                           <td>{warehouseNames[po.warehouseId] || po.warehouseId}</td>
-                          <td>{po.skuCode}</td>
+                          <td>{skuCodeToName[po.skuCode] ?? po.skuCode}</td>
                           <td>{po.poNumber}</td>
-                          <td className="text-[var(--color-muted)]">{formatShortDate(po.etd)}</td>
                           <td className="text-[var(--color-muted)]">{formatShortDate(po.eta)}</td>
                           <td>{po.quantity}</td>
                           <td>
@@ -1178,9 +1141,8 @@ export default function PurchaseOrders() {
                       <tr>
                         <th>UID</th>
                         <th>Warehouse</th>
-                        <th>SKU</th>
+                        <th>Item Name</th>
                         <th>PO Number</th>
-                        <th>ETD</th>
                         <th>ETA</th>
                         <th>PO Qty</th>
                         <th>Actions</th>
@@ -1193,9 +1155,8 @@ export default function PurchaseOrders() {
                             {po.groupId || ''}
                           </td>
                           <td>{warehouseNames[po.warehouseId] || po.warehouseId}</td>
-                          <td>{po.skuCode}</td>
+                          <td>{skuCodeToName[po.skuCode] ?? po.skuCode}</td>
                           <td>{po.poNumber}</td>
-                          <td className="text-[var(--color-muted)]">{formatShortDate(po.etd)}</td>
                           <td className="text-[var(--color-muted)]">{formatShortDate(po.eta)}</td>
                           <td>{po.quantity}</td>
                           <td>
@@ -1255,12 +1216,17 @@ export default function PurchaseOrders() {
       )}
 
       {/* Edit PO modal */}
-      {editModal && (
+      {editModal && (() => {
+        const po = editModal.po;
+        const isB = po.type === 'B';
+        const groupRowsA = isB ? getGroupRowsAWithEndForB(po) : [];
+        const computed = isB ? computeRowB(po, groupRowsA) : computeRowA(po);
+        return (
         <div className="modal-backdrop" onClick={() => { setEditModal(null); setError(''); }}>
-          <div className="card modal-content p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="card modal-content p-6 max-w-lg" onClick={(e) => e.stopPropagation()}>
             <h2 className="mb-4 text-lg font-semibold">Edit purchase order</h2>
             <p className="mb-4 text-sm text-[var(--color-muted)]">
-              Warehouse: <strong>{warehouseNames[editModal.po.warehouseId] || editModal.po.warehouseId}</strong> · SKU: <strong>{editModal.po.skuCode}</strong> (read-only)
+              Warehouse: <strong>{warehouseNames[po.warehouseId] || po.warehouseId}</strong> · Item: <strong>{skuCodeToName[po.skuCode] ?? po.skuCode}</strong> (read-only)
             </p>
             <form onSubmit={handleEditSubmit} className="grid grid-cols-1 gap-4">
               <div>
@@ -1268,16 +1234,41 @@ export default function PurchaseOrders() {
                 <input placeholder="PO Number" value={editForm.poNumber} onChange={(e) => setEditForm((f) => ({ ...f, poNumber: e.target.value }))} className="input w-full" required />
               </div>
               <div>
-                <label className="mb-1 block text-sm text-[var(--color-muted)]">Quantity</label>
-                <input type="number" min="1" placeholder="Quantity" value={editForm.quantity} onChange={(e) => setEditForm((f) => ({ ...f, quantity: e.target.value }))} className="input w-full" required />
-              </div>
-              <div>
                 <label className="mb-1 block text-sm text-[var(--color-muted)]">ETD (departure)</label>
                 <input type="date" value={editForm.etd} onChange={(e) => setEditForm((f) => ({ ...f, etd: e.target.value }))} className="input w-full" />
               </div>
               <div>
-                <label className="mb-1 block text-sm text-[var(--color-muted)]">ETA (arrival) – optional</label>
+                <label className="mb-1 block text-sm text-[var(--color-muted)]">ETA (arrival)</label>
                 <input type="date" value={editForm.eta} onChange={(e) => setEditForm((f) => ({ ...f, eta: e.target.value }))} className="input w-full" />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm text-[var(--color-muted)]">PO Qty</label>
+                <input type="number" min="1" placeholder="Quantity" value={editForm.quantity} onChange={(e) => setEditForm((f) => ({ ...f, quantity: e.target.value }))} className="input w-full" required />
+              </div>
+              {isB && (
+                <div>
+                  <label className="mb-1 block text-sm text-[var(--color-muted)]">Final ETA early by</label>
+                  <input type="number" placeholder="Optional" value={editForm.finalEtaEarlyBy} onChange={(e) => setEditForm((f) => ({ ...f, finalEtaEarlyBy: e.target.value }))} className="input w-full" />
+                </div>
+              )}
+              <div className="border-t border-[var(--color-border)] pt-4 space-y-2">
+                <p className="text-sm font-medium text-[var(--color-muted)]">Calculated (read-only)</p>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <span>ETA early by (days):</span>
+                  <span>{computed.etaEarlyByDays != null ? Math.round(computed.etaEarlyByDays) : '—'}</span>
+                  <span>PO Qty stock end days:</span>
+                  <span>{computed.poQtyStockEndDays != null ? computed.poQtyStockEndDays.toFixed(1) : '—'}</span>
+                  <span>Total Stock end days:</span>
+                  <span>{computed.totalStockEndDays != null ? computed.totalStockEndDays.toFixed(1) : '—'}</span>
+                  <span>Stock End Date:</span>
+                  <span>{computed.stockEndDateMs != null ? formatShortDate(computed.stockEndDateMs) : '—'}</span>
+                  {isB && (
+                    <>
+                      <span>Final ETA early by:</span>
+                      <span>{computed.finalEtaEarlyBy != null ? Math.round(computed.finalEtaEarlyBy) : '—'}</span>
+                    </>
+                  )}
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="submit" disabled={editSubmitting} className="btn-primary">{editSubmitting ? 'Saving…' : 'Save changes'}</button>
@@ -1286,7 +1277,7 @@ export default function PurchaseOrders() {
             </form>
           </div>
         </div>
-      )}
+        );})()}
     </div>
   );
 }
