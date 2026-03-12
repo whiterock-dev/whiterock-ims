@@ -77,6 +77,9 @@ export default function PurchaseOrders() {
   const [newRowB, setNewRowB] = useState(null);
   const [archiveToggle, setArchiveToggle] = useState(false);
   const [planningInputs, setPlanningInputs] = useState({}); // { [poId]: { etd: string, eta: string, maxLoadingDays: string } }
+  const [planningExtras, setPlanningExtras] = useState([]); // extra planning-only rows not backed by POs
+  const [newPlanningRow, setNewPlanningRow] = useState(null); // draft planning-only row
+  const [itemPicker, setItemPicker] = useState(null); // { context: 'A' | 'B' | 'planning' }
   const [warehouseFilter, setWarehouseFilter] = useState('');
 
   useEffect(() => {
@@ -245,6 +248,7 @@ export default function PurchaseOrders() {
         groupId: defaultUid,
         warehouseId: '',
         skuCode: '',
+        multiSkuCodes: [],
         quantity: '',
         etd: formatDate(Date.now()),
         eta: '',
@@ -261,6 +265,7 @@ export default function PurchaseOrders() {
         groupId: '',
         warehouseId: '',
         skuCode: '',
+        multiSkuCodes: [],
         quantity: '',
         etd: formatDate(Date.now()),
         eta: '',
@@ -275,10 +280,14 @@ export default function PurchaseOrders() {
     const cleanPo = (newRowA.poNumber || '').trim();
     const cleanWarehouse = (newRowA.warehouseId || '').trim();
     const skuCode = (newRowA.skuCode || '').trim();
+    const multiSkuCodes = Array.isArray(newRowA.multiSkuCodes)
+      ? newRowA.multiSkuCodes.filter((v) => v && v.trim())
+      : [];
+    const skusToUse = multiSkuCodes.length > 1 ? multiSkuCodes : (skuCode ? [skuCode] : []);
     const cleanGroupId = (newRowA.groupId || '').trim() || cleanPo;
     const qty = Number(newRowA.quantity);
-    if (!cleanPo || !cleanWarehouse || !skuCode) {
-      setError('PO Number, Warehouse, and SKU are required.');
+    if (!cleanPo || !cleanWarehouse || skusToUse.length === 0) {
+      setError('PO Number, Warehouse, and at least one SKU are required.');
       return;
     }
     if (!Number.isFinite(qty) || qty < 1) {
@@ -287,17 +296,21 @@ export default function PurchaseOrders() {
     }
     setSubmitting(true);
     try {
-      await addPurchaseOrder({
-        poNumber: cleanPo,
-        warehouseId: cleanWarehouse,
-        skuCode,
-        quantity: qty,
-        etd: newRowA.etd || undefined,
-        eta: newRowA.eta || undefined,
-        type: 'A',
-        groupId: cleanGroupId,
-        archived: false,
-      });
+      await Promise.all(
+        skusToUse.map((code) =>
+          addPurchaseOrder({
+            poNumber: cleanPo,
+            warehouseId: cleanWarehouse,
+            skuCode: code,
+            quantity: qty,
+            etd: newRowA.etd || undefined,
+            eta: newRowA.eta || undefined,
+            type: 'A',
+            groupId: cleanGroupId,
+            archived: false,
+          }),
+        ),
+      );
       setNewRowA(null);
     } catch (e) {
       setError(e.message || 'Failed to add PO line.');
@@ -312,10 +325,14 @@ export default function PurchaseOrders() {
     const cleanPo = (newRowB.poNumber || '').trim();
     const cleanWarehouse = (newRowB.warehouseId || '').trim();
     const skuCode = (newRowB.skuCode || '').trim();
+    const multiSkuCodes = Array.isArray(newRowB.multiSkuCodes)
+      ? newRowB.multiSkuCodes.filter((v) => v && v.trim())
+      : [];
+    const skusToUse = multiSkuCodes.length > 1 ? multiSkuCodes : (skuCode ? [skuCode] : []);
     const cleanGroupId = (newRowB.groupId || '').trim();
     const qty = Number(newRowB.quantity);
-    if (!cleanPo || !cleanWarehouse || !skuCode) {
-      setError('PO Number, Warehouse, and SKU are required.');
+    if (!cleanPo || !cleanWarehouse || skusToUse.length === 0) {
+      setError('PO Number, Warehouse, and at least one SKU are required.');
       return;
     }
     if (!Number.isFinite(qty) || qty < 1) {
@@ -332,18 +349,22 @@ export default function PurchaseOrders() {
     }
     setSubmitting(true);
     try {
-      await addPurchaseOrder({
-        poNumber: cleanPo,
-        warehouseId: cleanWarehouse,
-        skuCode,
-        quantity: qty,
-        etd: newRowB.etd || undefined,
-        eta: newRowB.eta || undefined,
-        type: 'B',
-        groupId: cleanGroupId || cleanPo,
-        finalEtaEarlyBy,
-        archived: false,
-      });
+      await Promise.all(
+        skusToUse.map((code) =>
+          addPurchaseOrder({
+            poNumber: cleanPo,
+            warehouseId: cleanWarehouse,
+            skuCode: code,
+            quantity: qty,
+            etd: newRowB.etd || undefined,
+            eta: newRowB.eta || undefined,
+            type: 'B',
+            groupId: cleanGroupId || cleanPo,
+            finalEtaEarlyBy,
+            archived: false,
+          }),
+        ),
+      );
       setNewRowB(null);
     } catch (e) {
       setError(e.message || 'Failed to add PO line.');
@@ -453,6 +474,56 @@ export default function PurchaseOrders() {
   const archivedTableARows = allTableARows.filter((po) => po.archived);
   const archivedTableBRows = filteredList.filter((po) => po.type === 'B' && po.archived);
   const hasAnyTableA = tableARows.length > 0;
+
+  // Planning table rows = Table B rows + extra planning-only rows (not backed by purchaseOrders)
+  const planningRows = [...tableBRows, ...planningExtras];
+
+  // Earliest / latest stock end dates for highlighting
+  const tableAStockEndDates = tableARows
+    .map((po) => computeRowA(po).stockEndDateMs)
+    .filter((v) => v != null);
+  const earliestTableAStockEnd =
+    tableAStockEndDates.length > 0 ? Math.min(...tableAStockEndDates) : null;
+  const latestTableAStockEnd =
+    tableAStockEndDates.length > 0 ? Math.max(...tableAStockEndDates) : null;
+
+  const tableBStockEndDates = tableBRows
+    .map((po) => {
+      const groupRowsAWithEnd = getGroupRowsAWithEndForB(po);
+      const b = computeRowB(po, groupRowsAWithEnd);
+      return b.stockEndDateMs;
+    })
+    .filter((v) => v != null);
+  const earliestTableBStockEnd =
+    tableBStockEndDates.length > 0 ? Math.min(...tableBStockEndDates) : null;
+  const latestTableBStockEnd =
+    tableBStockEndDates.length > 0 ? Math.max(...tableBStockEndDates) : null;
+
+  const getStockEndClassForTableA = (ms) => {
+    if (ms == null) return 'text-[var(--color-muted)]';
+    if (
+      earliestTableAStockEnd != null &&
+      latestTableAStockEnd != null &&
+      earliestTableAStockEnd !== latestTableAStockEnd
+    ) {
+      if (ms === earliestTableAStockEnd) return 'text-red-600 font-semibold';
+      if (ms === latestTableAStockEnd) return 'text-emerald-600 font-semibold';
+    }
+    return 'text-[var(--color-muted)]';
+  };
+
+  const getStockEndClassForTableB = (ms) => {
+    if (ms == null) return 'text-[var(--color-muted)]';
+    if (
+      earliestTableBStockEnd != null &&
+      latestTableBStockEnd != null &&
+      earliestTableBStockEnd !== latestTableBStockEnd
+    ) {
+      if (ms === earliestTableBStockEnd) return 'text-red-600 font-semibold';
+      if (ms === latestTableBStockEnd) return 'text-emerald-600 font-semibold';
+    }
+    return 'text-[var(--color-muted)]';
+  };
 
   const uidToColorIndex = useMemo(() => {
     const set = new Set();
@@ -583,21 +654,43 @@ export default function PurchaseOrders() {
                       ))}
                     </select>
                   </td>
-                  <td style={{ minWidth: 180 }}>
-                    <select
-                      value={newRowA.skuCode}
-                      onChange={(e) =>
-                        setNewRowA((prev) => ({ ...(prev || {}), skuCode: e.target.value }))
-                      }
-                      className="input w-full"
-                    >
-                      <option value="">Select item</option>
-                      {activeSkus.map((s) => (
-                        <option key={s.id} value={s.skuCode}>
-                          {s.name || s.skuCode}
-                        </option>
-                      ))}
-                    </select>
+                  <td style={{ minWidth: 220 }}>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={newRowA.skuCode}
+                        onChange={(e) =>
+                          setNewRowA((prev) => ({
+                            ...(prev || {}),
+                            skuCode: e.target.value,
+                            multiSkuCodes: prev?.multiSkuCodes && prev.multiSkuCodes.length > 0
+                              ? prev.multiSkuCodes
+                              : e.target.value
+                              ? [e.target.value]
+                              : [],
+                          }))
+                        }
+                        className="input w-full"
+                      >
+                        <option value="">Select item</option>
+                        {activeSkus.map((s) => (
+                          <option key={s.id} value={s.skuCode}>
+                            {s.name || s.skuCode}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setItemPicker({ context: 'A' })}
+                        className="btn-ghost py-1 px-2 text-xs"
+                      >
+                        Choose…
+                      </button>
+                    </div>
+                    {Array.isArray(newRowA.multiSkuCodes) && newRowA.multiSkuCodes.length > 1 && (
+                      <div className="mt-1 text-[10px] text-[var(--color-muted)]">
+                        {newRowA.multiSkuCodes.length} items selected
+                      </div>
+                    )}
                   </td>
                   <td>
                     <input
@@ -667,7 +760,7 @@ export default function PurchaseOrders() {
                     <td>{po.poNumber}</td>
                     <td className="text-[var(--color-muted)]">{formatShortDate(po.eta)}</td>
                     <td>{po.quantity}</td>
-                    <td className="text-[var(--color-muted)]">
+                    <td className={getStockEndClassForTableA(a.stockEndDateMs)}>
                       {a.stockEndDateMs != null ? formatShortDate(a.stockEndDateMs) : '—'}
                     </td>
                     <td>
@@ -788,21 +881,43 @@ export default function PurchaseOrders() {
                       ))}
                     </select>
                   </td>
-                  <td style={{ minWidth: 180 }}>
-                    <select
-                      value={newRowB.skuCode}
-                      onChange={(e) =>
-                        setNewRowB((prev) => ({ ...(prev || {}), skuCode: e.target.value }))
-                      }
-                      className="input w-full"
-                    >
-                      <option value="">Select item</option>
-                      {activeSkus.map((s) => (
-                        <option key={s.id} value={s.skuCode}>
-                          {s.name || s.skuCode}
-                        </option>
-                      ))}
-                    </select>
+                  <td style={{ minWidth: 220 }}>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={newRowB.skuCode}
+                        onChange={(e) =>
+                          setNewRowB((prev) => ({
+                            ...(prev || {}),
+                            skuCode: e.target.value,
+                            multiSkuCodes: prev?.multiSkuCodes && prev.multiSkuCodes.length > 0
+                              ? prev.multiSkuCodes
+                              : e.target.value
+                              ? [e.target.value]
+                              : [],
+                          }))
+                        }
+                        className="input w-full"
+                      >
+                        <option value="">Select item</option>
+                        {activeSkus.map((s) => (
+                          <option key={s.id} value={s.skuCode}>
+                            {s.name || s.skuCode}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setItemPicker({ context: 'B' })}
+                        className="btn-ghost py-1 px-2 text-xs"
+                      >
+                        Choose…
+                      </button>
+                    </div>
+                    {Array.isArray(newRowB.multiSkuCodes) && newRowB.multiSkuCodes.length > 1 && (
+                      <div className="mt-1 text-[10px] text-[var(--color-muted)]">
+                        {newRowB.multiSkuCodes.length} items selected
+                      </div>
+                    )}
                   </td>
                   <td>
                     <input
@@ -876,7 +991,7 @@ export default function PurchaseOrders() {
                     <td>{po.poNumber}</td>
                     <td className="text-[var(--color-muted)]">{formatShortDate(po.eta)}</td>
                     <td>{po.quantity}</td>
-                    <td className="text-[var(--color-muted)]">
+                    <td className={getStockEndClassForTableB(b.stockEndDateMs)}>
                       {b.stockEndDateMs != null ? formatShortDate(b.stockEndDateMs) : '—'}
                     </td>
                     <td>
@@ -912,37 +1027,248 @@ export default function PurchaseOrders() {
         </div>
       </div>
 
-      {/* Planning table linked to Table B (per UID and SKU) */}
-      {tableBRows.length > 0 && (
-        <div className="mb-8">
-          <h2 className="mb-2 text-sm font-semibold text-[var(--color-muted)]">
+      {/* Planning table linked to Table B (per UID and SKU), with option to add standalone planning rows */}
+      <div className="mb-8">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-[var(--color-muted)]">
             Planning (per PO / UID)
           </h2>
-          <div className="table-wrapper overflow-x-auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>UID</th>
-                  <th>Warehouse</th>
-                  <th>SKU</th>
-                  <th>PO Number</th>
-                  <th>ETA</th>
-                  <th>Max loading days</th>
-                  <th>Estimated stock-out date</th>
-                  <th>Stock End Date of previous PO</th>
-                  <th>Days required to reach estimated stock-out date</th>
-                  <th>Minimum between Max loading and Days required</th>
-                  <th>Suggested PO Qty (Daily average × min days)</th>
-                  <th className="w-0 whitespace-nowrap">Actions</th>
+          <button
+            type="button"
+            onClick={() => {
+              setError('');
+              setNewPlanningRow((prev) =>
+                prev || {
+                  id: `planning-${Date.now()}`,
+                  groupId: '',
+                  warehouseId: '',
+                  skuCode: '',
+                  multiSkuCodes: [],
+                  poNumber: '',
+                  eta: '',
+                  maxLoadingDays: '',
+                },
+              );
+            }}
+            className="btn-secondary py-1 px-2 text-xs"
+          >
+            + Add line
+          </button>
+        </div>
+        <div className="table-wrapper overflow-x-auto">
+          <table>
+            <thead>
+              <tr>
+                <th>UID</th>
+                <th>Warehouse</th>
+                <th>SKU</th>
+                <th>PO Number</th>
+                <th>ETA</th>
+                <th>Max loading days</th>
+                <th>Estimated stock-out date</th>
+                <th>Stock End Date of previous PO</th>
+                <th>Days required to reach estimated stock-out date</th>
+                <th>Minimum between Max loading and Days required</th>
+                <th>Suggested PO Qty (Daily average × min days)</th>
+                <th className="w-0 whitespace-nowrap">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {newPlanningRow && (
+                <tr key={newPlanningRow.id}>
+                  <td>
+                    <input
+                      type="text"
+                      value={newPlanningRow.groupId}
+                      onChange={(e) =>
+                        setNewPlanningRow((prev) =>
+                          prev ? { ...prev, groupId: e.target.value } : prev,
+                        )
+                      }
+                      className="input w-full"
+                      placeholder="UID"
+                    />
+                  </td>
+                  <td style={{ minWidth: 160 }}>
+                    <select
+                      value={newPlanningRow.warehouseId}
+                      onChange={(e) =>
+                        setNewPlanningRow((prev) =>
+                          prev ? { ...prev, warehouseId: e.target.value } : prev,
+                        )
+                      }
+                      className="input w-full"
+                    >
+                      <option value="">Select warehouse</option>
+                      {warehouses.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td style={{ minWidth: 220 }}>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={newPlanningRow.skuCode}
+                        onChange={(e) =>
+                          setNewPlanningRow((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  skuCode: e.target.value,
+                                  multiSkuCodes:
+                                    prev.multiSkuCodes && prev.multiSkuCodes.length > 0
+                                      ? prev.multiSkuCodes
+                                      : e.target.value
+                                      ? [e.target.value]
+                                      : [],
+                                }
+                              : prev,
+                          )
+                        }
+                        className="input w-full"
+                      >
+                        <option value="">Select item</option>
+                        {activeSkus.map((s) => (
+                          <option key={s.id} value={s.skuCode}>
+                            {s.name || s.skuCode}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setItemPicker({ context: 'planning' })}
+                        className="btn-ghost py-1 px-2 text-xs"
+                      >
+                        Choose…
+                      </button>
+                    </div>
+                    {Array.isArray(newPlanningRow.multiSkuCodes) &&
+                      newPlanningRow.multiSkuCodes.length > 1 && (
+                        <div className="mt-1 text-[10px] text-[var(--color-muted)]">
+                          {newPlanningRow.multiSkuCodes.length} items selected
+                        </div>
+                      )}
+                  </td>
+                  <td>
+                    <input
+                      type="text"
+                      value={newPlanningRow.poNumber}
+                      onChange={(e) =>
+                        setNewPlanningRow((prev) =>
+                          prev ? { ...prev, poNumber: e.target.value } : prev,
+                        )
+                      }
+                      className="input w-full"
+                      placeholder="PO number (optional)"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="date"
+                      value={newPlanningRow.eta}
+                      onChange={(e) =>
+                        setNewPlanningRow((prev) =>
+                          prev ? { ...prev, eta: e.target.value } : prev,
+                        )
+                      }
+                      className="input w-full"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min="1"
+                      value={newPlanningRow.maxLoadingDays}
+                      onChange={(e) =>
+                        setNewPlanningRow((prev) =>
+                          prev ? { ...prev, maxLoadingDays: e.target.value } : prev,
+                        )
+                      }
+                      className="input w-24"
+                      placeholder="Days"
+                    />
+                  </td>
+                  <td className="text-[var(--color-muted)]">—</td>
+                  <td className="text-[var(--color-muted)]">—</td>
+                  <td>—</td>
+                  <td>—</td>
+                  <td>—</td>
+                  <td className="whitespace-nowrap">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const cleanUid = (newPlanningRow.groupId || '').trim();
+                          const cleanWarehouse = (newPlanningRow.warehouseId || '').trim();
+                          const skuCode = (newPlanningRow.skuCode || '').trim();
+                          const multiSkuCodes = Array.isArray(newPlanningRow.multiSkuCodes)
+                            ? newPlanningRow.multiSkuCodes.filter((v) => v && v.trim())
+                            : [];
+                          const skusToUse =
+                            multiSkuCodes.length > 1 ? multiSkuCodes : (skuCode ? [skuCode] : []);
+                          if (!cleanUid || !cleanWarehouse || skusToUse.length === 0) {
+                            setError(
+                              'UID, Warehouse, and at least one SKU are required for planning row.',
+                            );
+                            return;
+                          }
+                          const baseId = newPlanningRow.id || `planning-${Date.now()}`;
+                          const etaVal = newPlanningRow.eta || '';
+                          const maxDaysVal = newPlanningRow.maxLoadingDays || '';
+
+                          const newExtras = skusToUse.map((code, index) => {
+                            const id =
+                              index === 0 ? baseId : `${baseId}-${index}-${code || 'sku'}`;
+                            return {
+                              id,
+                              groupId: cleanUid,
+                              warehouseId: cleanWarehouse,
+                              skuCode: code,
+                              poNumber: (newPlanningRow.poNumber || '').trim(),
+                              __planningExtra: true,
+                            };
+                          });
+                          setPlanningExtras((prev) => [...prev, ...newExtras]);
+
+                          if (etaVal || maxDaysVal) {
+                            setPlanningInputs((prev) => {
+                              const next = { ...prev };
+                              newExtras.forEach((row) => {
+                                next[row.id] = {
+                                  ...(next[row.id] || {}),
+                                  eta: etaVal,
+                                  maxLoadingDays: maxDaysVal,
+                                };
+                              });
+                              return next;
+                            });
+                          }
+                          setNewPlanningRow(null);
+                        }}
+                        className="btn-primary py-1 px-3 text-xs"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewPlanningRow(null)}
+                        className="btn-ghost py-1 px-2 text-xs"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {tableBRows.map((po) => {
-                  const input = planningInputs[po.id] || {
-                    etd: '',
-                    eta: '',
-                    maxLoadingDays: '',
-                  };
+              )}
+              {planningRows.map((po) => {
+                const key = po.id;
+                const input = planningInputs[key] || {
+                  etd: '',
+                  eta: '',
+                  maxLoadingDays: '',
+                };
                   const maxLoadingDaysNum = Number(input.maxLoadingDays);
                   const maxLoadingValid =
                     !Number.isNaN(maxLoadingDaysNum) && maxLoadingDaysNum > 0;
@@ -989,8 +1315,10 @@ export default function PurchaseOrders() {
                       ? Math.round(dailyAvg * minDays)
                       : null;
 
+                  const isExtra = po.__planningExtra === true;
+
                   return (
-                    <tr key={po.id}>
+                    <tr key={key}>
                       <td className={`text-xs font-medium ${getUidColor(po.groupId || '')}`}>
                         {po.groupId || ''}
                       </td>
@@ -1004,8 +1332,8 @@ export default function PurchaseOrders() {
                           onChange={(e) =>
                             setPlanningInputs((prev) => ({
                               ...prev,
-                              [po.id]: {
-                                ...(prev[po.id] || {}),
+                              [key]: {
+                                ...(prev[key] || {}),
                                 eta: e.target.value,
                               },
                             }))
@@ -1021,8 +1349,8 @@ export default function PurchaseOrders() {
                           onChange={(e) =>
                             setPlanningInputs((prev) => ({
                               ...prev,
-                              [po.id]: {
-                                ...(prev[po.id] || {}),
+                              [key]: {
+                                ...(prev[key] || {}),
                                 maxLoadingDays: e.target.value,
                               },
                             }))
@@ -1052,30 +1380,53 @@ export default function PurchaseOrders() {
                       </td>
                       <td className="whitespace-nowrap">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEdit(po)}
-                            className="btn-ghost py-1 text-xs"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteConfirm({ po })}
-                            className="btn-ghost py-1 text-xs text-[var(--color-danger)] hover:bg-red-50 hover:text-[var(--color-danger)]"
-                          >
-                            Delete
-                          </button>
+                          {!isExtra && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openEdit(po)}
+                                className="btn-ghost py-1 text-xs"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteConfirm({ po })}
+                                className="btn-ghost py-1 text-xs text-[var(--color-danger)] hover:bg-red-50 hover:text-[var(--color-danger)]"
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                          {isExtra && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPlanningExtras((prev) =>
+                                  prev.filter((row) => row.id !== key),
+                                )
+                              }
+                              className="btn-ghost py-1 text-xs text-[var(--color-danger)] hover:bg-red-50 hover:text-[var(--color-danger)]"
+                            >
+                              Remove
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
                   );
                 })}
+                {planningRows.length === 0 && !newPlanningRow && (
+                  <tr>
+                    <td colSpan={12} className="text-center text-sm text-[var(--color-muted)] py-3">
+                      No planning rows yet. Add a planning row above, or create Table B lines.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
-      )}
 
       {/* Archived section */}
       {(archivedTableARows.length > 0 || archivedTableBRows.length > 0) && (
@@ -1176,6 +1527,125 @@ export default function PurchaseOrders() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Item picker modal for selecting multiple SKUs under one PO/UID */}
+      {itemPicker && (
+        <div className="modal-backdrop" onClick={() => setItemPicker(null)}>
+          <div className="card modal-content max-w-xl p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="mb-3 text-lg font-semibold">Select items</h2>
+            <p className="mb-3 text-xs text-[var(--color-muted)]">
+              Pick one or more items to add under the same PO number and UID.
+            </p>
+            <div className="max-h-80 overflow-y-auto border border-[var(--color-border)] rounded-md">
+              {activeSkus.map((s) => {
+                const code = s.skuCode;
+                const label = s.name || s.skuCode;
+                let selected = false;
+                if (itemPicker.context === 'A' && newRowA) {
+                  selected = Array.isArray(newRowA.multiSkuCodes)
+                    ? newRowA.multiSkuCodes.includes(code)
+                    : newRowA.skuCode === code;
+                } else if (itemPicker.context === 'B' && newRowB) {
+                  selected = Array.isArray(newRowB.multiSkuCodes)
+                    ? newRowB.multiSkuCodes.includes(code)
+                    : newRowB.skuCode === code;
+                } else if (itemPicker.context === 'planning' && newPlanningRow) {
+                  selected = Array.isArray(newPlanningRow.multiSkuCodes)
+                    ? newPlanningRow.multiSkuCodes.includes(code)
+                    : newPlanningRow.skuCode === code;
+                }
+                return (
+                  <label
+                    key={s.id}
+                    className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 text-sm last:border-b-0"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        const update = (prevCodes = [], fallbackCode) => {
+                          const base = Array.isArray(prevCodes) && prevCodes.length > 0
+                            ? prevCodes
+                            : fallbackCode
+                            ? [fallbackCode]
+                            : [];
+                          if (checked) {
+                            return base.includes(code) ? base : [...base, code];
+                          }
+                          return base.filter((c) => c !== code);
+                        };
+
+                        if (itemPicker.context === 'A') {
+                          setNewRowA((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  skuCode: checked
+                                    ? code
+                                    : prev.skuCode && prev.skuCode !== code
+                                    ? prev.skuCode
+                                    : '',
+                                  multiSkuCodes: update(prev.multiSkuCodes, prev.skuCode),
+                                }
+                              : prev,
+                          );
+                        } else if (itemPicker.context === 'B') {
+                          setNewRowB((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  skuCode: checked
+                                    ? code
+                                    : prev.skuCode && prev.skuCode !== code
+                                    ? prev.skuCode
+                                    : '',
+                                  multiSkuCodes: update(prev.multiSkuCodes, prev.skuCode),
+                                }
+                              : prev,
+                          );
+                        } else if (itemPicker.context === 'planning') {
+                          setNewPlanningRow((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  skuCode: checked
+                                    ? code
+                                    : prev.skuCode && prev.skuCode !== code
+                                    ? prev.skuCode
+                                    : '',
+                                  multiSkuCodes: update(prev.multiSkuCodes, prev.skuCode),
+                                }
+                              : prev,
+                          );
+                        }
+                      }}
+                    />
+                    <span className="font-medium">{label}</span>
+                    <span className="ml-auto text-[10px] text-[var(--color-muted)]">
+                      {code}
+                    </span>
+                  </label>
+                );
+              })}
+              {activeSkus.length === 0 && (
+                <p className="px-3 py-2 text-sm text-[var(--color-muted)]">
+                  No active SKUs available. Add SKUs first in the SKU Database.
+                </p>
+              )}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setItemPicker(null)}
+                className="btn-secondary"
+              >
+                Done
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
