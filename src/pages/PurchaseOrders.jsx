@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   addPurchaseOrder,
   updatePurchaseOrder,
@@ -60,6 +61,8 @@ function computeWarehouseStockEndDate(stock) {
 }
 
 export default function PurchaseOrders() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialWarehouseFilter = searchParams.get('warehouseId') || '';
   const [list, setList] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [skus, setSkus] = useState([]);
@@ -80,7 +83,7 @@ export default function PurchaseOrders() {
   const [planningExtras, setPlanningExtras] = useState([]); // extra planning-only rows not backed by POs
   const [newPlanningRow, setNewPlanningRow] = useState(null); // draft planning-only row
   const [itemPicker, setItemPicker] = useState(null); // { context: 'A' | 'B' | 'planning' }
-  const [warehouseFilter, setWarehouseFilter] = useState('');
+  const [warehouseFilter, setWarehouseFilter] = useState(initialWarehouseFilter);
 
   useEffect(() => {
     const unsub = subscribeWarehouses(setWarehouses);
@@ -103,6 +106,19 @@ export default function PurchaseOrders() {
     const unsub = subscribeAllStock(setStockList);
     return () => unsub();
   }, []);
+
+  // Keep URL in sync with warehouse filter so links from Warehouses page can pre-filter PO list
+  useEffect(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (warehouseFilter) {
+        next.set('warehouseId', warehouseFilter);
+      } else {
+        next.delete('warehouseId');
+      }
+      return next;
+    });
+  }, [warehouseFilter, setSearchParams]);
 
   // Pre-fill UID from SKU Database when warehouse + SKU is selected (link PO UID with SKU Database UID)
   useEffect(() => {
@@ -1065,10 +1081,6 @@ export default function PurchaseOrders() {
                 <th>PO Number</th>
                 <th>ETA</th>
                 <th>Max loading days</th>
-                <th>Estimated stock-out date</th>
-                <th>Stock End Date of previous PO</th>
-                <th>Days required to reach estimated stock-out date</th>
-                <th>Minimum between Max loading and Days required</th>
                 <th>Suggested PO Qty (Daily average × min days)</th>
                 <th className="w-0 whitespace-nowrap">Actions</th>
               </tr>
@@ -1190,11 +1202,6 @@ export default function PurchaseOrders() {
                       placeholder="Days"
                     />
                   </td>
-                  <td className="text-[var(--color-muted)]">—</td>
-                  <td className="text-[var(--color-muted)]">—</td>
-                  <td>—</td>
-                  <td>—</td>
-                  <td>—</td>
                   <td className="whitespace-nowrap">
                     <div className="flex gap-2">
                       <button
@@ -1358,22 +1365,6 @@ export default function PurchaseOrders() {
                           className="input w-24"
                           placeholder="Days"
                         />
-                      </td>
-                      <td className="text-[var(--color-muted)]">
-                        {estimatedStockOutMs != null
-                          ? formatShortDate(estimatedStockOutMs)
-                          : '—'}
-                      </td>
-                      <td className="text-[var(--color-muted)]">
-                        {prevStockEndMs != null
-                          ? formatShortDate(prevStockEndMs)
-                          : '—'}
-                      </td>
-                      <td>
-                        {daysRequired != null ? daysRequired : '—'}
-                      </td>
-                      <td>
-                        {minDays != null ? minDays : '—'}
                       </td>
                       <td>
                         {suggestedQty != null ? suggestedQty : '—'}

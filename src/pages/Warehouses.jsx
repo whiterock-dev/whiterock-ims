@@ -58,27 +58,57 @@ export default function Warehouses() {
           <thead>
             <tr>
               <th>Name</th>
-              <th>Location</th>
+              <th>Stock</th>
+              <th>PO</th>
               <th className="w-0 whitespace-nowrap">Actions</th>
             </tr>
           </thead>
           <tbody>
             {list.map((w) => (
               <tr key={w.id} className="align-middle">
-                <td className="align-middle"><Link to={`/warehouses/${w.id}`} className="link font-medium">{w.name}</Link></td>
-                <td className="align-middle text-[var(--color-muted)]">{w.location || '—'}</td>
+                <td className="align-middle font-medium">
+                  {w.name}
+                </td>
+                <td className="align-middle whitespace-nowrap">
+                  <Link to={`/warehouses/${w.id}`} className="link text-xs">
+                    View stock
+                  </Link>
+                </td>
+                <td className="align-middle whitespace-nowrap">
+                  <Link
+                    to={`/purchase-orders?warehouseId=${encodeURIComponent(w.id)}`}
+                    className="link text-xs"
+                  >
+                    View PO
+                  </Link>
+                </td>
                 <td className="align-middle whitespace-nowrap">
                   <div className="flex items-center gap-2">
-                    <Link to={`/warehouses/${w.id}`} className="link text-xs">View</Link>
-                    <button type="button" onClick={() => startEdit(w)} className="btn-ghost py-0 text-xs leading-normal">Edit</button>
-                    <button type="button" onClick={() => setDeleteConfirm({ id: w.id, name: w.name })} className="btn-ghost py-0 text-xs leading-normal text-[var(--color-danger)] hover:bg-red-50 hover:text-[var(--color-danger)]">Remove</button>
+                    <button
+                      type="button"
+                      onClick={() => startEdit(w)}
+                      className="btn-ghost py-0 text-xs leading-normal"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirm({ id: w.id, name: w.name })}
+                      className="btn-ghost py-0 text-xs leading-normal text-[var(--color-danger)] hover:bg-red-50 hover:text-[var(--color-danger)]"
+                    >
+                      Remove
+                    </button>
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {list.length === 0 && !error && <p className="px-4 py-8 text-center text-[var(--color-muted)]">No warehouses yet. Add one above.</p>}
+        {list.length === 0 && !error && (
+          <p className="px-4 py-8 text-center text-[var(--color-muted)]">
+            No warehouses yet. Add one above.
+          </p>
+        )}
       </div>
 
       {/* Edit modal */}
