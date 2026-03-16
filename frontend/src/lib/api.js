@@ -1,3 +1,10 @@
+/*
+ * Developed by Nerdshouse Technologies LLP — https://nerdshouse.com
+ * © 2026 WhiteRock (Royal Enterprise). All rights reserved.
+ *
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ */
+
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export async function apiGet(getIdToken, path, params = {}) {

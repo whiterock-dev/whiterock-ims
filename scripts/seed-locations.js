@@ -1,3 +1,10 @@
+/*
+ * Developed by Nerdshouse Technologies LLP — https://nerdshouse.com
+ * © 2026 WhiteRock (Royal Enterprise). All rights reserved.
+ *
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ */
+
 /**
  * Seed the locations collection in Firestore (used by Warehouse Location dropdown).
  * Uses the same credentials as seed-first-member.js.

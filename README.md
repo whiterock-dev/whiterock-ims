@@ -1,76 +1,121 @@
-# IMS – Inventory Reorder Planning
+# IMS (Inventory Management System)
 
-Single React app using **Firestore** and **Firebase Auth**. Deploy to **Vercel** as a static site.
+> Developed and delivered by **Nerdshouse Technologies LLP**
 
-## Stack
+---
 
-- **Frontend:** React, Tailwind CSS, Vite
-- **Database:** Firestore (client SDK)
-- **Auth:** Firebase Authentication (email/password)
-- **Hosting:** Vercel
+## About
 
-## Setup
+IMS is a React + Firebase based inventory and reorder planning application used to manage warehouses, SKUs, stock movement history, purchase orders, member access, and planning calculations for stock-out and replenishment timelines.
 
-1. **Firebase**
-   - Create a project at [Firebase Console](https://console.firebase.google.com).
-   - Enable **Authentication** → Sign-in method → **Email/Password** and **Google**.
-   - Create a **Firestore** database.
-   - In Project settings → General, copy the Firebase config and update `src/lib/firebase.js` if your project is different from the default (whiterock-ims).
+## Tech Stack
 
-2. **Firestore indexes**
-   - In Firestore → Indexes, create composite indexes when the app asks for them, or deploy:
-   - `firebase deploy --only firestore:indexes` (if using Firebase CLI with `firestore.indexes.json`).
+| Layer        | Technology                                  |
+|--------------|---------------------------------------------|
+| Frontend     | React, Vite, Tailwind CSS                  |
+| Backend      | Node.js, Express                            |
+| Database     | Firebase Firestore                          |
+| Hosting      | Vercel (frontend), Node runtime (backend)   |
+| Other        | Firebase Authentication, Firebase Admin SDK |
 
-3. **Security rules**
-   - In Firestore → Rules, paste the contents of `firestore.rules` (or deploy with `firebase deploy --only firestore:rules`).
-   - Rules require `request.auth != null` for all reads/writes.
-   - **If you see "Missing or insufficient permissions"**: your live rules are likely not updated. Deploy rules: `firebase deploy --only firestore:rules` (after `firebase use <project-id>`), or copy `firestore.rules` into the Firebase Console → Firestore → Rules and click **Publish**.
+## Getting Started
 
-## Run locally
+### Prerequisites
+
+- Node.js 20+ and npm 10+
+- Firebase project with Firestore and Authentication enabled
+- Service account JSON key for backend/admin scripts
+
+### Installation
 
 ```bash
+# Clone the repository
+git clone <repo-url>
+cd <project-folder>
+
+# Install dependencies
 npm install
-npm run dev
+cd backend && npm install && cd ..
+cd frontend && npm install && cd ..
+
+# Set up environment
+cp .env.example .env
+# Fill in required values in .env
 ```
 
-Open http://localhost:5173. Sign in with Google. **Only emails added under Members can sign in** — add the first admin in Firestore Console (members collection, add a doc with email, displayName, role: "Admin", createdAt: now) or sign in with an existing member account and use the Members page to add others.
+### Running Locally
 
-## Deploy to Vercel
+```bash
+# frontend app
+npm run dev
 
-1. Push the repo to GitHub (or connect another Git provider).
-2. In [Vercel](https://vercel.com), import the project.
-3. Build command: `npm run build`
-4. Output directory: `dist`
-5. Deploy. The SPA rewrite is in `vercel.json`.
+# backend api (separate terminal)
+cd backend && npm run dev
+```
 
-No server or env vars are required for the app; Firebase config is in the client (public). For a different Firebase project, use env vars (e.g. `VITE_FIREBASE_PROJECT_ID`) and read them in `src/lib/firebase.js`.
+### Building for Production
 
-## App sections
+```bash
+# root frontend build
+npm run build
 
-- **Warehouse** – List and add warehouses; click to view and manage stock.
-- **Current View** – Dashboard: stock levels, safety stock, days left, stock-out date, projected sales, total weight. Update closing stock manually.
-- **Database (SKU Master)** – SKU CRUD (code, name, category, status, rates, weight).
-- **Purchase Orders** – Create POs; 60-day window; set status to Pending / In Transit / Received. **Received** adds quantity to stock and logs a movement.
-- **History** – Stock movement log with timestamps.
-- **Members** – List of allowed members (only these emails can sign in with Google). Add by email + name + role; edit or remove. No password — members sign in with Google only.
+# optional standalone frontend build
+cd frontend && npm run build
+```
 
-All data updates in real time via Firestore listeners.
+## Environment Variables
 
-## Members (Google-only allow-list)
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `VITE_API_URL` | Frontend API base URL | Yes |
+| `VITE_DEV_API_PROXY_TARGET` | Dev proxy target for `/api` in Vite | No |
+| `VITE_FIREBASE_API_KEY` | Firebase web API key | Yes |
+| `VITE_FIREBASE_AUTH_DOMAIN` | Firebase auth domain | Yes |
+| `VITE_FIREBASE_PROJECT_ID` | Firebase project ID | Yes |
+| `VITE_FIREBASE_APP_ID` | Firebase web app ID | Yes |
+| `PORT` | Backend API port | Yes |
+| `CORS_ORIGIN` | Allowed frontend origin for CORS | Yes |
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to Firebase service-account JSON | Yes |
 
-Only users listed in **Members** can sign in. Admins add members by email (and optional name and role); those users then sign in with Google (no password). Add/Edit/Delete members use Firestore directly — no API or service account needed.
+## Project Structure
 
-**Add the first admin from the repo (no Console):**
+```text
+.
+├── src/                     # Main frontend application (active)
+├── backend/src/             # Express API routes, auth middleware, Firestore init
+├── scripts/                 # One-time data seeding scripts
+├── api/                     # Serverless-style members API helper
+├── frontend/                # Additional frontend workspace (legacy/parallel)
+├── firestore.rules          # Firestore security rules
+├── firestore.indexes.json   # Firestore index definitions
+├── vercel.json              # SPA rewrite rules for deployment
+└── firebase.json            # Firebase rules/index mapping
+```
 
-1. Firebase Console → Project settings → **Service accounts** → **Generate new private key** → save the JSON.
-2. In the project root create a `.env` file with one line (paste the JSON as a single line, no line breaks):
-   ```
-   FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"whiterock-ims",...}
-   ```
-3. Run:
-   ```bash
-   npm install
-   npm run seed-member -- your@gmail.com "Your Name" Admin
-   ```
-   Replace `your@gmail.com` and `"Your Name"` with the Google email and name for the first admin.
-4. Sign in with Google in the app using that email.
+## Deployment
+
+- **Vercel**: `vercel.json` rewrites all routes to `index.html` for SPA routing.
+- **Firebase Firestore**:
+  - Deploy rules: `firebase deploy --only firestore:rules`
+  - Deploy indexes: `firebase deploy --only firestore:indexes`
+- **Backend**: deploy `backend/` to your Node host and provide required env vars from `.env.example`.
+
+## Third-Party Services
+
+| Service | Purpose | Setup Required |
+|---------|---------|----------------|
+| Firebase Authentication | User sign-in and access gating | Yes |
+| Firebase Firestore | Inventory, SKU, PO, and history data | Yes |
+| Vercel | Frontend hosting/deployment | Optional (if using Vercel) |
+
+---
+
+## Developed By
+
+**Nerdshouse Technologies LLP**  
+🌐 [nerdshouse.com](https://nerdshouse.com)  
+📧 axit@nerdshouse.com
+
+---
+
+*© 2026 WhiteRock (Royal Enterprise). All rights reserved. Developed by Nerdshouse Technologies LLP.*

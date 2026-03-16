@@ -1,3 +1,10 @@
+/*
+ * Developed by Nerdshouse Technologies LLP — https://nerdshouse.com
+ * © 2026 WhiteRock (Royal Enterprise). All rights reserved.
+ *
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ */
+
 /**
  * One-time script to add the first member (or any member) to Firestore.
  * Only these emails can sign in with Google. Run once to add yourself as admin.

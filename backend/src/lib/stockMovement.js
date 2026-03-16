@@ -1,3 +1,10 @@
+/*
+ * Developed by Nerdshouse Technologies LLP — https://nerdshouse.com
+ * © 2026 WhiteRock (Royal Enterprise). All rights reserved.
+ *
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ */
+
 import { getFirestore } from '../db/firestore.js';
 
 export async function addStockMovement(db, { warehouseId, skuCode, changeType, quantityDelta, previousStock, newStock, userId, poNumber }) {
