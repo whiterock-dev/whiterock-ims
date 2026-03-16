@@ -1,3 +1,9 @@
+/*
+ * Developed by Nerdshouse Technologies LLP — https://nerdshouse.com
+ * © 2026 WhiteRock (Royal Enterprise). All rights reserved.
+ *
+ * Unauthorized copying, modification, or distribution is strictly prohibited.
+ */
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';

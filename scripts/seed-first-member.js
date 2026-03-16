@@ -65,7 +65,7 @@ async function run() {
   const normalized = email.trim().toLowerCase();
   const snap = await col.where('email', '==', normalized).limit(1).get();
   if (!snap.empty) {
-    console.log('Member with email', email, 'already exists. No change.');
+    console.info('Member with email', email, 'already exists. No change.');
     process.exit(0);
   }
   await col.add({
@@ -74,7 +74,7 @@ async function run() {
     role,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
-  console.log('Added member:', email, '|', displayName || '(no name)', '|', role);
+  console.info('Added member:', email, '|', displayName || '(no name)', '|', role);
 }
 
 run().catch((e) => {

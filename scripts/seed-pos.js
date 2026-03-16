@@ -98,7 +98,7 @@ async function run() {
     archived: false,
   });
 
-  console.log('Seeded demo PO group', groupId);
+  console.info('Seeded demo PO group', groupId);
 }
 
 run().catch((e) => {

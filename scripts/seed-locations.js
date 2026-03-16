@@ -65,7 +65,7 @@ async function run() {
 
   const toAdd = locationNames.filter((name) => !existingNames.has(name.trim().toLowerCase()));
   if (toAdd.length === 0) {
-    console.log('All given locations already exist. No change.');
+    console.info('All given locations already exist. No change.');
     process.exit(0);
   }
 
@@ -74,9 +74,9 @@ async function run() {
       name: String(name).trim(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    console.log('Added location:', name);
+    console.info('Added location:', name);
   }
-  console.log('Done. Total locations added:', toAdd.length);
+  console.info('Done. Total locations added:', toAdd.length);
 }
 
 run().catch((e) => {

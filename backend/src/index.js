@@ -18,7 +18,9 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || true, credentials: true }));
 app.use(express.json());
 
 // Root – API is under /api
-app.get('/', (req, res) => res.send('IMS API. Use the frontend at http://localhost:5173 — API routes: /api/health, /api/warehouses, /api/skus, etc.'));
+app.get('/', (req, res) =>
+  res.send('IMS API. Use the frontend app — API routes: /api/health, /api/warehouses, /api/skus, etc.'),
+);
 
 // Health (no auth)
 app.get('/api/health', (req, res) => res.json({ ok: true }));
@@ -35,4 +37,4 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-app.listen(PORT, () => console.log(`IMS API running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.info(`IMS API running on http://localhost:${PORT}`));
